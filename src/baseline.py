@@ -187,85 +187,77 @@ def calculate_moving_averages(prices, short_window=50, long_window=200):
         tuple: DataFrames for short and long moving averages
     """
     # Calculate moving averages
-    short_ma = prices.rolling(window=short_window).mean()
-    long_ma = prices.rolling(window=long_window).mean()
+    short_ma = prices.rolling(window=short_window).mean().bfill()
+    long_ma = prices.rolling(window=long_window).mean().bfill()
+
     
     return short_ma, long_ma
 
 def moving_average_strategy(prices, returns, short_window=50, long_window=200, initial_capital=100000):
     """
-    Implement moving average crossover strategy.
-    
-    Parameters:
-        prices (DataFrame): DataFrame with price data
-        returns (DataFrame): DataFrame with returns data
-        short_window (int): Short-term moving average window
-        long_window (int): Long-term moving average window
-        initial_capital (float): Initial investment amount
-        
-    Returns:
-        tuple: Portfolio values DataFrame and final weights array
+    Moving Average Crossover Strategy:
+    Buys assets when short MA > long MA. Allocates equally among 'active' assets with buy signal.
+    If no signals, remains in cash (i.e. no position).
     """
-    # Calculate moving averages
-    short_ma, long_ma = calculate_moving_averages(prices, short_window, long_window)
-    
-    # Create signals: 1 for long (short MA > long MA), 0 for cash (short MA < long MA)
-    signals = pd.DataFrame(index=prices.index, columns=prices.columns)
-    
-    for col in prices.columns:
-        signals[col] = 0.0
-        # Create signals based on moving average crossover
-        signals.loc[short_ma[col] > long_ma[col], col] = 1.0
-    
-    # Fill NaN values with 0 (no position until both MAs are available)
-    signals = signals.fillna(0.0)
-    
-    # Calculate daily positions (portfolio value for each asset)
-    # For each day, allocate capital equally among assets with positive signals
-    portfolio_value = pd.Series(initial_capital, index=prices.index)
+    # Compute moving averages with forward/backward fill to avoid NaNs
+    short_ma = prices.rolling(window=short_window).mean().bfill()
+    long_ma = prices.rolling(window=long_window).mean().bfill()
+
+    # Create signal matrix: 1 if short MA > long MA, else 0
+    signals = (short_ma > long_ma).astype(float)
+
+    # Track portfolio value (initialized to initial capital)
+    portfolio_value = pd.Series(initial_capital, index=prices.index, dtype=float)
+
+    # Track asset-level positions
     positions = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
-    
-    # Initialize first day positions
-    first_valid_idx = max(long_window, 0)
-    if first_valid_idx >= len(prices):
-        first_valid_idx = len(prices) - 1
-        
-    for col in prices.columns:
-        positions.iloc[first_valid_idx, prices.columns.get_loc(col)] = signals.iloc[first_valid_idx, signals.columns.get_loc(col)] * portfolio_value.iloc[first_valid_idx] * (1.0 / len(prices.columns))
-    
-    # Calculate daily position values
-    for t in range(first_valid_idx + 1, len(prices)):
-        # Make sure the indices align between positions and returns
-        if t-1 < len(positions) and t < len(returns):
-            # Update portfolio value based on yesterday's positions
-            prev_positions = positions.iloc[t-1]
-            current_returns = returns.iloc[t-1]  # Use t-1 for returns to align with positions
-            portfolio_value.iloc[t] = np.sum(prev_positions * (1 + current_returns))
-            
-            # Count assets with buy signal today
-            active_assets = signals.iloc[t].sum()
-            
-            if active_assets > 0:
-                # Allocate today's portfolio equally among assets with buy signal
-                for col in prices.columns:
-                    # If buy signal, allocate portion of portfolio
-                    if signals.iloc[t, signals.columns.get_loc(col)] == 1.0:
-                        positions.iloc[t, positions.columns.get_loc(col)] = portfolio_value.iloc[t] / active_assets
-                    else:
-                        positions.iloc[t, positions.columns.get_loc(col)] = 0.0
-            else:
-                # If no buy signals, allocate to cash (not included in positions)
-                positions.iloc[t] = 0.0
-    
-    # Calculate final weights based on last day
-    final_weights = positions.iloc[-1] / portfolio_value.iloc[-1] if portfolio_value.iloc[-1] > 0 else np.zeros(len(prices.columns))
-    
-    # Convert portfolio value to DataFrame
-    portfolio_df = pd.DataFrame(portfolio_value, columns=['Portfolio Value'])
-    
-    logger.info(f"Moving average strategy completed. Final portfolio value: {portfolio_df.iloc[-1, 0]:.2f}")
-    
-    return portfolio_df, final_weights
+
+    # Begin simulation from point where long MA is first valid
+    first_valid_idx = long_ma.dropna().first_valid_index()
+    if first_valid_idx is None:
+        logger.warning("Insufficient data to compute long-term moving averages.")
+        return pd.DataFrame(portfolio_value, columns=['Portfolio Value']), np.zeros(len(prices.columns))
+
+    first_idx = prices.index.get_loc(first_valid_idx)
+
+    # Initial positions (equal allocation among buy signals)
+    active_assets = signals.iloc[first_idx].sum()
+    if active_assets > 0:
+        for col in prices.columns:
+            if signals.iloc[first_idx][col] == 1.0:
+                positions.iloc[first_idx][col] = portfolio_value.iloc[first_idx] / active_assets
+
+    # Iterate day-by-day
+    for t in range(first_idx + 1, len(prices)):
+        prev_pos = positions.iloc[t - 1]
+        current_ret = returns.iloc[t - 1]  # Align with previous day’s positions
+
+        # Update portfolio value
+        portfolio_value.iloc[t] = np.sum(prev_pos * (1 + current_ret))
+
+        # Determine buy signals today
+        active_assets = signals.iloc[t].sum()
+
+        if active_assets > 0:
+            for col in prices.columns:
+                if signals.iloc[t][col] == 1.0:
+                    positions.iloc[t][col] = portfolio_value.iloc[t] / active_assets
+                else:
+                    positions.iloc[t][col] = 0.0
+        else:
+            # No signals — hold cash (zero asset allocation)
+            positions.iloc[t] = 0.0
+
+    # Compute final weights (last row normalized by portfolio value)
+    if portfolio_value.iloc[-1] > 0:
+        final_weights = positions.iloc[-1] / portfolio_value.iloc[-1]
+    else:
+        final_weights = np.zeros(len(prices.columns))
+
+    logger.info(f"Moving average strategy completed. Final portfolio value: {portfolio_value.iloc[-1]:.2f}")
+
+    return pd.DataFrame(portfolio_value, columns=['Portfolio Value']), final_weights
+
 
 def plot_portfolio_comparison(portfolios, title='Portfolio Comparison', save_path=None):
     """

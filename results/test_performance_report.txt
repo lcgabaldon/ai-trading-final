@@ -1,9 +1,9 @@
 Performance Report (Test Period)
-Generated on: 2025-05-05 11:08:58
+Generated on: 2025-05-09 14:10:59
 
                   Total Return Annualized Return Volatility Sharpe Ratio Maximum Drawdown
-Random Allocation        5.68%             2.70%      6.86%         0.39           -6.71%
-60/40 Allocation        14.08%             6.57%     10.80%         0.61           -8.87%
-Max Sharpe              17.38%             8.05%     13.14%         0.61          -10.62%
-Moving Average           0.00%             0.00%     34.33%         0.00          -33.57%
-Q-Learning              -0.79%            -0.38%      4.46%        -0.09           -8.42%
+Random Allocation        6.61%             3.14%      6.90%         0.45           -6.93%
+60/40 Allocation        13.59%             6.34%     10.56%         0.60           -8.44%
+Max Sharpe              14.62%             6.81%     12.62%         0.54          -10.11%
+Moving Average          -1.69%            -0.82%      7.68%        -0.11          -14.06%
+Q-Learning              18.74%             8.65%      5.14%         1.68           -2.97%
